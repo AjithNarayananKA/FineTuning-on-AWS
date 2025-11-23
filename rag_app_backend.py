@@ -1,4 +1,3 @@
-
 from dotenv import load_dotenv
 load_dotenv()
 import os
@@ -15,9 +14,12 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 # from langchain_openai import OpenAIEmbeddings
+from dotenv import load_dotenv
+load_dotenv()
 
 os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY")
-embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+# embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+embeddings = GoogleGenerativeAIEmbeddings(model="text-embedding-004")
 embedding_dim = len(embeddings.embed_query("hello"))
 
 API_URL = os.getenv("API_URL")
@@ -129,7 +131,7 @@ vector_store.add_documents(docs)
 
 retriever = vector_store.as_retriever(
     search_type="mmr",
-    search_kwargs={"k": 3}
+    search_kwargs={"k": 1}
 )
 
 def format_docs(docs):
@@ -149,15 +151,49 @@ Question:
 Answer:
 """
 
-def call_finetuned_llm(prompt: str):
-    payload = {"inputs": prompt}
-    resp = requests.post(API_URL, json=payload)
+def call_finetuned_llm(prompt: str) -> str:
+    # Safety guard – don’t ever send an empty prompt to the model
+    if not prompt.strip():
+        return "Error: empty prompt was generated before calling the LLM."
 
+    headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers["x-api-key"] = API_KEY  # if you later protect the API with an API key
+
+    payload = {"inputs": prompt}
+
+    resp = requests.post(API_URL, headers=headers, json=payload, timeout=60)
     try:
-        data = resp.json()
-        return data.get("result", "No response found.")
+        resp.raise_for_status()
     except Exception as e:
-        return f"Error decoding LLM response: {str(e)}"
+        return f"HTTP error from API: {e} | body={resp.text}"
+
+    outer = resp.json()
+
+    # Handle both: proxy-wrapped {"statusCode":200,"body":"..."}
+    # and direct {"result":[...]} styles, just in case.
+    if isinstance(outer, dict) and "statusCode" in outer and "body" in outer:
+        body_str = outer["body"]
+        if isinstance(body_str, str):
+            try:
+                inner = json.loads(body_str)
+            except json.JSONDecodeError:
+                return f"Unexpected 'body' from API: {body_str}"
+        else:
+            inner = body_str
+    else:
+        inner = outer
+
+    # inner should be {"result": [...]}
+    result = inner.get("result", inner)
+
+    if isinstance(result, list) and result:
+        first = result[0]
+        if isinstance(first, dict) and "generated_text" in first:
+            return first["generated_text"]
+        return str(first)
+
+    return str(result)
     
 def generate_answer(question: str):
 

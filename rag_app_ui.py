@@ -19,4 +19,4 @@ if st.button("Generate Answer"):
         st.info(response["context"])
 
         st.subheader("LLM Answer")
-        st.success(response["answer"])
+        st.success(response)
