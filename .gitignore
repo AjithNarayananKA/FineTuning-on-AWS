@@ -10,3 +10,4 @@ wheels/
 .venv
 .env
 secret.txt
+finetine_on_aws_venv
